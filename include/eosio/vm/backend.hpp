@@ -43,16 +43,55 @@ namespace eosio { namespace vm {
       using host_t = Host;
 
       template <typename HostFunctions = nullptr_t>
-      backend(wasm_code& code, HostFunctions = nullptr) : _ctx(typename Impl::template parser<Host>{ _mod.allocator }.parse_module(code, _mod)) {
+      backend(wasm_code& code, HostFunctions = nullptr) : _ctx(parse_module(code)) {
 	 if constexpr (!std::is_same_v<HostFunctions, nullptr_t>)
             HostFunctions::resolve(_mod);
 	 _mod.finalize();
       }
       template <typename HostFunctions = nullptr_t>
-      backend(wasm_code_ptr& ptr, size_t sz, HostFunctions = nullptr) : _ctx(typename Impl::template parser<Host>{ _mod.allocator }.parse_module2(ptr, sz, _mod)) {
+      backend(wasm_code_ptr& ptr, size_t sz, HostFunctions = nullptr, bool single_parsing = true) : _ctx(parse_module2(ptr, sz, single_parsing)) {
 	 if constexpr (!std::is_same_v<HostFunctions, nullptr_t>)
             HostFunctions::resolve(_mod);
 	 _mod.finalize();
+      }
+
+      module& parse_module(wasm_code& code) {
+         _mod.allocator.use_default_memory();
+         return typename Impl::template parser<Host>{ _mod.allocator }.parse_module(code, _mod);
+      }
+
+      module& parse_module2(wasm_code_ptr& ptr, size_t sz, bool single_parsing) {
+         if (single_parsing) {
+            _mod.allocator.use_default_memory();
+            return typename Impl::template parser<Host>{ _mod.allocator }.parse_module2(ptr, sz, _mod);
+         }
+
+         // To prevent large number of memory mappings used, use two-passes parsing.
+         // The first pass finds max size of memory required for parsing;
+         // this memory is released after parsing.
+         // The second pass uses malloc with the required size of memory.
+         wasm_code_ptr orig_ptr = ptr;
+         size_t largest_size = 0;
+
+         // First pass: finds max size of memory required by parsing.
+         // Memory used by parsing will be freed when going out of the scope
+         {
+            module first_pass_module;
+            // For JIT, skips code generation as it is not needed and
+            // does not count the code memory size
+            detail::code_generate_mode code_gen_mode = Impl::is_jit ? detail::code_generate_mode::skip : detail::code_generate_mode::use_same_allocator;
+            first_pass_module.allocator.use_default_memory();
+            typename Impl::template parser<Host>{ first_pass_module.allocator }.parse_module2(ptr, sz, first_pass_module, code_gen_mode);
+            first_pass_module.finalize();
+            largest_size = first_pass_module.allocator.largest_used_size();
+         }
+
+         // Second pass: uses largest_size of memory for actual parsing
+         _mod.allocator.use_fixed_memory(Impl::is_jit, largest_size);
+         // For JIT, uses a seperate allocator for code generation as mod's memory
+         // does not include memory for code
+         detail::code_generate_mode code_gen_mode = Impl::is_jit ? detail::code_generate_mode::use_seperate_allocator : detail::code_generate_mode::use_same_allocator;
+         return typename Impl::template parser<Host>{ _mod.allocator }.parse_module2(orig_ptr, sz, _mod, code_gen_mode);
       }
 
       template <typename... Args>

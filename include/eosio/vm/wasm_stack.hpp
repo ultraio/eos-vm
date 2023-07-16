@@ -55,6 +55,17 @@ namespace eosio { namespace vm {
       void         trim(size_t amt) { _index -= amt; }
       size_t       size() const { return _index; }
 
+      // This is only applicable when underlying allocator is unmanaged_vector,
+      // which is std::vector
+      void         reset_capacity() {
+         if constexpr (std::is_same_v<Allocator, nullptr_t>) {
+            if (_store.capacity() > constants::initial_stack_size) {
+               _store.resize(constants::initial_stack_size);
+               _store.shrink_to_fit();
+            }
+         }
+      }
+
     private:
       using base_data_store_t = std::conditional_t<std::is_same_v<Allocator, nullptr_t>, unmanaged_vector<ElemT>, managed_vector<ElemT, Allocator>>;
 
@@ -62,7 +73,7 @@ namespace eosio { namespace vm {
       size_t            _index = 0;
    };
 
-   using operand_stack = stack<operand_stack_elem, constants::max_stack_size>;
+   using operand_stack = stack<operand_stack_elem, constants::initial_stack_size>;
    using call_stack    = stack<activation_frame,   constants::max_call_depth + 1, bounded_allocator>;
 
 }} // namespace eosio::vm
