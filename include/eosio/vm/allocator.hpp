@@ -188,7 +188,7 @@ namespace eosio { namespace vm {
          EOS_VM_ASSERT(base != MAP_FAILED, wasm_bad_alloc, "failed to allocate jit segment");
          segment s{base, size};
          _segments.emplace_back(std::move(s));
-         bool success = true;
+         bool success = false;
          auto guard_1 = scope_guard{[&] { if(!success) { _segments.pop_back(); } }};
          auto pos2 = free_blocks_by_size.insert({size, base}).first;
          auto guard_2 = scope_guard{[&] { if(!success) { free_blocks_by_size.erase(pos2); }}};
